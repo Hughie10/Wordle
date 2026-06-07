@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wordle Multiplayer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Wordle Multiplayer</h1>
+      <p>Solo, quick-fire, daily, head-to-head, survival, and blind challenge modes.</p>
+    </header>
+
+    <main>
+      <section class="panel" id="auth-panel">
+        <h2>Sign in</h2>
+        <div class="row">
+          <input id="username" type="text" placeholder="Username (3-20 chars)" />
+          <button id="register-btn">Register / Login</button>
+        </div>
+        <p id="auth-status"></p>
+      </section>
+
+      <section class="panel hidden" id="play-panel">
+        <h2>Start a game</h2>
+        <div class="grid">
+          <label>Letter Count
+            <input id="letter-count" type="number" min="3" max="8" value="5" />
+          </label>
+          <label>Opponent
+            <input id="opponent" list="user-options" placeholder="Search username" />
+            <datalist id="user-options"></datalist>
+          </label>
+          <label>Mode
+            <select id="mode">
+              <option value="solo">Solo</option>
+              <option value="quick-fire">Quick Fire</option>
+              <option value="daily">Daily Challenge</option>
+              <option value="survival">Survival</option>
+              <option value="head-to-head">Head-to-Head</option>
+              <option value="blind">Blind Challenge</option>
+            </select>
+          </label>
+          <label>Assigned Word (challenge modes)
+            <input id="assigned-word" type="text" maxlength="8" placeholder="dictionary word" />
+          </label>
+          <label>Hint / Category (optional)
+            <input id="hint" type="text" maxlength="100" placeholder="e.g. Music genre" />
+          </label>
+        </div>
+        <button id="start-btn">Start / Send Challenge</button>
+      </section>
+
+      <section class="panel hidden" id="game-panel">
+        <h2>Current Game</h2>
+        <p id="game-meta"></p>
+        <div id="hint-box"></div>
+        <div id="board"></div>
+        <div class="row">
+          <input id="guess" type="text" placeholder="Enter guess" />
+          <button id="guess-btn">Submit Guess</button>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="challenge-panel">
+        <h2>Pending Challenges</h2>
+        <div id="challenge-list"></div>
+      </section>
+
+      <section class="panel hidden" id="leaderboard-panel">
+        <h2>Leaderboards</h2>
+        <div class="row">
+          <select id="leaderboard-mode">
+            <option value="overall">Overall</option>
+            <option value="quick-fire">Quick Fire</option>
+            <option value="daily">Daily</option>
+            <option value="head-to-head">Head-to-Head</option>
+            <option value="blind">Blind</option>
+            <option value="survival">Survival</option>
+          </select>
+          <button id="refresh-leaderboard">Refresh</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Player</th><th>Points</th><th>Wins</th><th>Games</th></tr>
+          </thead>
+          <tbody id="leaderboard-body"></tbody>
+        </table>
+      </section>
+
+      <section class="panel hidden" id="history-panel">
+        <h2>History</h2>
+        <div id="history-list"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+app_name: wordle-multiplayer
+version: 1.0.0
+services:
+  wordle:
+    image:
+      repository: ghcr.io/hughie10/wordle
+      tag: latest
+      pull_policy: IfNotPresent
+    ports:
+      - container_port: 3000
+        host_port: 3000
+        protocol: tcp
+    environment:
+      - name: PORT
+        value: "3000"
+      - name: DATA_DIR
+        value: /data
+    volume_mounts:
+      - name: wordle-data
+        mount_path: /data
+volumes:
+  wordle-data:
+    type: ixVolume
+    ix_volume_config:
+      dataset_name: wordle-data

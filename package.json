@@ -1,0 +1,27 @@
+{
+  "name": "wordle",
+  "version": "1.0.0",
+  "description": "A real-time multiplayer Wordle game with multiple game modes, built with Node.js and Docker.",
+  "main": "server.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hughie10/Wordle.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Hughie10/Wordle/issues"
+  },
+  "homepage": "https://github.com/Hughie10/Wordle#readme",
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.21.0"
+  }
+}
