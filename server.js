@@ -310,6 +310,20 @@ function createChallenge({ mode, from, to, letterCount, assignedWord, hint }) {
 }
 
 function acceptChallenge(challenge, responderWord, responderHint) {
+  if (challenge.mode === 'daily') {
+    createDailyGame(challenge.from, challenge.letterCount);
+    const game = createDailyGame(challenge.to, challenge.letterCount);
+
+    challenge.status = 'accepted';
+    challenge.updatedAt = nowIso();
+    challenge.gameId = game.id;
+
+    store.saveChallenge(challenge);
+    emitGameUpdate(game);
+    emitToUser(challenge.from, { type: 'challenge_accepted', challenge, game: serializeForPlayer(game, challenge.from) });
+    return game;
+  }
+
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const game = createBaseGame(challenge.mode, challenge.letterCount, [challenge.from, challenge.to], expiresAt);
 
@@ -523,8 +537,8 @@ app.post('/api/game/start', (req, res) => {
 app.post('/api/challenge/create', (req, res) => {
   try {
     const mode = String(req.body.mode || 'head-to-head');
-    if (mode !== 'head-to-head' && mode !== 'blind') {
-      throw new Error('Challenge mode must be head-to-head or blind');
+    if (mode !== 'daily' && mode !== 'head-to-head' && mode !== 'blind') {
+      throw new Error('Challenge mode must be daily, head-to-head or blind');
     }
 
     const from = cleanUsername(req.body.from);
@@ -537,12 +551,15 @@ app.post('/api/challenge/create', (req, res) => {
     requireUser(to);
 
     const letterCount = clampLetterCount(req.body.letterCount);
-    const assignedWord = normalizeWord(req.body.assignedWord);
-    if (assignedWord.length !== letterCount || !wordSet.has(assignedWord)) {
-      throw new Error(`Assigned word must be in local dictionary with ${letterCount} letters`);
+    const hint = String(req.body.hint || '').trim();
+    let assignedWord = null;
+    if (mode === 'head-to-head' || mode === 'blind') {
+      assignedWord = normalizeWord(req.body.assignedWord);
+      if (assignedWord.length !== letterCount || !wordSet.has(assignedWord)) {
+        throw new Error(`Assigned word must be in local dictionary with ${letterCount} letters`);
+      }
     }
 
-    const hint = String(req.body.hint || '').trim();
     const challenge = createChallenge({ mode, from, to, letterCount, assignedWord, hint });
 
     res.json({ challenge });
@@ -573,12 +590,16 @@ app.post('/api/challenge/respond', (req, res) => {
       return res.json({ challenge });
     }
 
-    const assignedWordBack = normalizeWord(req.body.assignedWordBack);
-    if (assignedWordBack.length !== challenge.letterCount || !wordSet.has(assignedWordBack)) {
-      throw new Error(`You must assign a valid ${challenge.letterCount}-letter dictionary word`);
+    let assignedWordBack = null;
+    let hintBack = null;
+    if (challenge.mode !== 'daily') {
+      assignedWordBack = normalizeWord(req.body.assignedWordBack);
+      if (assignedWordBack.length !== challenge.letterCount || !wordSet.has(assignedWordBack)) {
+        throw new Error(`You must assign a valid ${challenge.letterCount}-letter dictionary word`);
+      }
+      hintBack = String(req.body.hintBack || '').trim();
     }
 
-    const hintBack = String(req.body.hintBack || '').trim();
     const game = acceptChallenge(challenge, assignedWordBack, hintBack);
 
     res.json({ challenge, game: serializeForPlayer(game, username) });
@@ -595,7 +616,7 @@ app.get('/api/challenges/:username', (req, res) => {
     const outgoing = store.listOutgoingChallengesForUser(username);
     const activeGames = store
       .listGamesByUser(username)
-      .filter((game) => game.status === 'active' && game.mode !== 'solo' && game.mode !== 'daily');
+      .filter((game) => game.status === 'active' && game.mode !== 'solo');
 
     res.json({ challenges: incoming, incoming, outgoing, activeGames });
   } catch (error) {

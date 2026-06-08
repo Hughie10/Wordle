@@ -163,6 +163,51 @@ button.full-width { width: 100%; }
 .tile.present { background: #4d4d22; border-color: #4d4d22; }
 .tile.absent { background: #303030; border-color: #303030; color: #aaa; }
 
+.keyboard {
+  margin-top: .85rem;
+  display: grid;
+  gap: .4rem;
+}
+
+.keyboard-row {
+  display: flex;
+  gap: .35rem;
+  justify-content: center;
+}
+
+.key {
+  min-height: 42px;
+  min-width: 34px;
+  padding: .5rem;
+  border-radius: 8px;
+  border: 1px solid #3b3b3b;
+  background: #777;
+  color: #0b0b0b;
+  font-weight: 700;
+}
+
+.key.wide {
+  min-width: 64px;
+}
+
+.key.absent {
+  background: #2a2a2a;
+  border-color: #2a2a2a;
+  color: #b0b0b0;
+}
+
+.key.present {
+  background: #8a7e2f;
+  border-color: #8a7e2f;
+  color: #111;
+}
+
+.key.correct {
+  background: var(--green-dark);
+  border-color: var(--green-dark);
+  color: #041008;
+}
+
 .mode-section {
   margin-top: .85rem;
   border-top: 1px solid #2d2d2d;
