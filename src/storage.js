@@ -93,6 +93,12 @@ class JsonlStore {
     );
   }
 
+  listOutgoingChallengesForUser(username) {
+    return [...this.challenges.values()].filter(
+      (challenge) => challenge.from === username && challenge.status === 'pending',
+    );
+  }
+
   getChallenge(id) {
     return this.challenges.get(id);
   }

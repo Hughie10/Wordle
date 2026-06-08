@@ -591,7 +591,13 @@ app.get('/api/challenges/:username', (req, res) => {
   try {
     const username = cleanUsername(req.params.username);
     requireUser(username);
-    res.json({ challenges: store.listChallengesForUser(username) });
+    const incoming = store.listChallengesForUser(username);
+    const outgoing = store.listOutgoingChallengesForUser(username);
+    const activeGames = store
+      .listGamesByUser(username)
+      .filter((game) => game.status === 'active' && game.mode !== 'solo' && game.mode !== 'daily');
+
+    res.json({ challenges: incoming, incoming, outgoing, activeGames });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
