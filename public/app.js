@@ -1,36 +1,48 @@
+const MODES = [
+  { id: 'quick-fire', label: 'Quick Fire', type: 'realtime' },
+  { id: 'daily', label: 'Daily Challenge', type: 'nonrealtime' },
+  { id: 'head-to-head', label: 'Head-to-Head', type: 'nonrealtime' },
+  { id: 'survival', label: 'Survival Mode', type: 'realtime' },
+  { id: 'blind', label: 'Blind Challenge', type: 'nonrealtime' },
+  { id: 'solo', label: 'Solo Mode', type: 'solo' },
+];
+
 const state = {
   username: null,
+  loggedIn: false,
   ws: null,
   currentGame: null,
-  pendingChallenges: [],
+  selectedMode: null,
+  challengeData: { incoming: [], outgoing: [], activeGames: [] },
+  loadingChallenges: false,
 };
 
 const elements = {
+  authToggleBtn: document.getElementById('auth-toggle-btn'),
+  authPanel: document.getElementById('auth-panel'),
   username: document.getElementById('username'),
   registerBtn: document.getElementById('register-btn'),
   authStatus: document.getElementById('auth-status'),
-  playPanel: document.getElementById('play-panel'),
-  gamePanel: document.getElementById('game-panel'),
-  challengePanel: document.getElementById('challenge-panel'),
-  leaderboardPanel: document.getElementById('leaderboard-panel'),
-  historyPanel: document.getElementById('history-panel'),
-  mode: document.getElementById('mode'),
-  letterCount: document.getElementById('letter-count'),
+  modeSidebar: document.getElementById('mode-sidebar'),
+  modeCards: document.getElementById('mode-cards'),
+  modePanel: document.getElementById('mode-panel'),
+  modePanelTitle: document.getElementById('mode-panel-title'),
+  modeHelpText: document.getElementById('mode-help-text'),
+  modeStatus: document.getElementById('mode-status'),
+  modeSections: document.getElementById('mode-sections'),
+  challengeBtn: document.getElementById('challenge-btn'),
+  challengeFields: document.getElementById('challenge-fields'),
   opponent: document.getElementById('opponent'),
   assignedWord: document.getElementById('assigned-word'),
   hint: document.getElementById('hint'),
-  startBtn: document.getElementById('start-btn'),
+  userOptions: document.getElementById('user-options'),
+  letterCount: document.getElementById('letter-count'),
+  startSoloBtn: document.getElementById('start-solo-btn'),
   gameMeta: document.getElementById('game-meta'),
   board: document.getElementById('board'),
+  hintBox: document.getElementById('hint-box'),
   guess: document.getElementById('guess'),
   guessBtn: document.getElementById('guess-btn'),
-  hintBox: document.getElementById('hint-box'),
-  challengeList: document.getElementById('challenge-list'),
-  userOptions: document.getElementById('user-options'),
-  leaderboardMode: document.getElementById('leaderboard-mode'),
-  refreshLeaderboard: document.getElementById('refresh-leaderboard'),
-  leaderboardBody: document.getElementById('leaderboard-body'),
-  historyList: document.getElementById('history-list'),
 };
 
 async function api(path, options = {}) {
@@ -38,7 +50,6 @@ async function api(path, options = {}) {
     headers: { 'content-type': 'application/json' },
     ...options,
   });
-
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || 'Request failed');
@@ -46,50 +57,8 @@ async function api(path, options = {}) {
   return data;
 }
 
-function showAppPanels() {
-  elements.playPanel.classList.remove('hidden');
-  elements.gamePanel.classList.remove('hidden');
-  elements.challengePanel.classList.remove('hidden');
-  elements.leaderboardPanel.classList.remove('hidden');
-  elements.historyPanel.classList.remove('hidden');
-}
-
-function connectSocket() {
-  if (state.ws) {
-    state.ws.close();
-  }
-
-  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  state.ws = new WebSocket(`${protocol}://${location.host}?username=${encodeURIComponent(state.username)}`);
-
-  state.ws.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
-
-    if (payload.type === 'connected') {
-      state.pendingChallenges = payload.challenges || [];
-      renderChallenges();
-      if (!state.currentGame && payload.activeGames?.length) {
-        state.currentGame = payload.activeGames[0];
-        renderGame();
-      }
-      return;
-    }
-
-    if (payload.type === 'challenge_pending') {
-      state.pendingChallenges.unshift(payload.challenge);
-      renderChallenges();
-      return;
-    }
-
-    if (payload.type === 'game_update') {
-      if (state.currentGame?.id === payload.game.id) {
-        state.currentGame = payload.game;
-        renderGame();
-      }
-      loadHistory();
-      loadLeaderboard();
-    }
-  };
+function setModeStatus(message = '') {
+  elements.modeStatus.textContent = message;
 }
 
 function makeTile(letter, status, width) {
@@ -103,29 +72,24 @@ function makeTile(letter, status, width) {
 function renderGame() {
   const game = state.currentGame;
   if (!game) {
-    elements.gameMeta.textContent = 'No active game.';
+    elements.gameMeta.textContent = 'Loading game...';
     elements.board.innerHTML = '';
     elements.hintBox.textContent = '';
     return;
   }
 
   const me = game.perPlayer[state.username];
-  const opponent = game.players.find((p) => p !== state.username);
+  const opponent = game.players.find((player) => player !== state.username);
   elements.gameMeta.textContent = `${game.mode} • ${game.status} • ${game.letterCount} letters${opponent ? ` vs ${opponent}` : ''}`;
-
-  if ((game.mode === 'head-to-head' || game.mode === 'blind') && me?.hint) {
-    elements.hintBox.textContent = `Hint from opponent: ${me.hint}`;
-  } else {
-    elements.hintBox.textContent = '';
-  }
+  elements.hintBox.textContent = (game.mode === 'head-to-head' || game.mode === 'blind') && me?.hint
+    ? `Hint from opponent: ${me.hint}`
+    : '';
 
   elements.board.innerHTML = '';
-
   const guesses = me?.guesses || [];
   for (const entry of guesses) {
     const row = document.createElement('div');
     row.className = 'guess-row';
-
     for (let i = 0; i < game.letterCount; i += 1) {
       row.appendChild(makeTile(entry.guess[i], entry.result[i], game.letterCount));
     }
@@ -134,78 +98,307 @@ function renderGame() {
 
   const statusText = document.createElement('p');
   if (game.status !== 'active') {
-    const winnerLabel = game.winner ? ` Winner: ${game.winner}.` : '';
-    statusText.textContent = `Game ended.${winnerLabel}`;
+    statusText.textContent = `Game ended.${game.winner ? ` Winner: ${game.winner}.` : ''}`;
   } else if (me?.solved) {
     statusText.textContent = 'Solved! Waiting for game completion...';
   }
   elements.board.appendChild(statusText);
 }
 
-function renderChallenges() {
-  elements.challengeList.innerHTML = '';
-  if (!state.pendingChallenges.length) {
-    elements.challengeList.textContent = 'No pending challenges.';
+function createSection(title, items, emptyText, itemRenderer) {
+  const section = document.createElement('section');
+  section.className = 'mode-section';
+  const heading = document.createElement('h4');
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = emptyText;
+    section.appendChild(empty);
+    return section;
+  }
+
+  for (const item of items) {
+    section.appendChild(itemRenderer(item));
+  }
+  return section;
+}
+
+function challengeItem(challenge, includeRespondActions = false) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'challenge-item';
+  const title = document.createElement('strong');
+  title.textContent = `${challenge.from} → ${challenge.to} • ${challenge.mode}`;
+  wrapper.appendChild(title);
+
+  const detail = document.createElement('div');
+  detail.className = 'muted';
+  detail.textContent = `${challenge.letterCount} letters`;
+  wrapper.appendChild(detail);
+
+  if (challenge.hint) {
+    const hint = document.createElement('div');
+    hint.textContent = `Hint: ${challenge.hint}`;
+    wrapper.appendChild(hint);
+  }
+
+  if (includeRespondActions) {
+    const wordInput = document.createElement('input');
+    wordInput.placeholder = 'Assign your return word';
+    wordInput.maxLength = 8;
+    wordInput.dataset.word = challenge.id;
+    wrapper.appendChild(wordInput);
+
+    const hintInput = document.createElement('input');
+    hintInput.placeholder = 'Optional hint/category';
+    hintInput.maxLength = 100;
+    hintInput.dataset.hint = challenge.id;
+    wrapper.appendChild(hintInput);
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const accept = document.createElement('button');
+    accept.textContent = 'Accept & Start';
+    accept.dataset.accept = challenge.id;
+    const reject = document.createElement('button');
+    reject.className = 'danger';
+    reject.textContent = 'Reject';
+    reject.dataset.reject = challenge.id;
+    row.append(accept, reject);
+    wrapper.appendChild(row);
+  }
+
+  return wrapper;
+}
+
+function gameItem(game) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'challenge-item';
+  const button = document.createElement('button');
+  button.className = 'secondary full-width';
+  button.dataset.gameId = game.id;
+  button.textContent = `Open ${game.mode} vs ${game.players.filter((p) => p !== state.username).join(', ') || 'self'}`;
+  wrapper.appendChild(button);
+  return wrapper;
+}
+
+function renderModeSections() {
+  const mode = MODES.find((entry) => entry.id === state.selectedMode);
+  elements.modeSections.innerHTML = '';
+  if (!mode) return;
+
+  if (state.loadingChallenges) {
+    const loading = document.createElement('p');
+    loading.className = 'muted';
+    loading.textContent = 'Loading challenges...';
+    elements.modeSections.appendChild(loading);
     return;
   }
 
-  for (const challenge of state.pendingChallenges) {
-    const container = document.createElement('div');
-    container.className = 'challenge-item';
-    container.innerHTML = `
-      <strong>${challenge.from}</strong> challenged you to ${challenge.mode} (${challenge.letterCount} letters)
-      ${challenge.hint ? `<div>Hint: ${challenge.hint}</div>` : ''}
-      <input placeholder="Assign your return word" maxlength="8" data-word="${challenge.id}" />
-      <input placeholder="Optional hint/category" maxlength="100" data-hint="${challenge.id}" />
-      <div class="row">
-        <button data-accept="${challenge.id}">Accept</button>
-        <button class="danger" data-reject="${challenge.id}">Reject</button>
-      </div>
-    `;
-    elements.challengeList.appendChild(container);
+  const incoming = state.challengeData.incoming.filter((challenge) => challenge.mode === mode.id);
+  const outgoing = state.challengeData.outgoing.filter((challenge) => challenge.mode === mode.id);
+  const activeGames = state.challengeData.activeGames.filter((game) => game.mode === mode.id);
+
+  if (mode.type === 'realtime') {
+    elements.modeSections.appendChild(createSection(
+      'Pending Challenges',
+      outgoing,
+      'No pending challenges sent yet.',
+      (challenge) => challengeItem(challenge, false),
+    ));
+    elements.modeSections.appendChild(createSection(
+      'Incoming Challenges',
+      [...incoming, ...activeGames],
+      'No incoming challenges right now.',
+      (item) => (item.players ? gameItem(item) : challengeItem(item, true)),
+    ));
+    return;
   }
+
+  const currentChallenges = [...outgoing, ...incoming, ...activeGames];
+  elements.modeSections.appendChild(createSection(
+    'Current Challenges',
+    currentChallenges,
+    'No current challenges for this mode.',
+    (item) => (item.players ? gameItem(item) : challengeItem(item, item.to === state.username)),
+  ));
+}
+
+function renderModePanel() {
+  if (!state.loggedIn || !state.selectedMode) {
+    elements.modePanel.classList.add('hidden');
+    return;
+  }
+
+  const mode = MODES.find((entry) => entry.id === state.selectedMode);
+  elements.modePanel.classList.remove('hidden');
+  elements.modePanelTitle.textContent = mode.label;
+
+  if (mode.id === 'solo') {
+    elements.modeHelpText.textContent = 'Solo mode starts immediately in the main board.';
+    elements.opponent.parentElement.classList.add('hidden');
+    elements.challengeFields.classList.add('hidden');
+    elements.challengeBtn.classList.add('hidden');
+  } else {
+    elements.modeHelpText.textContent = mode.type === 'realtime'
+      ? 'Search a player, challenge them, and monitor pending/incoming challenges.'
+      : 'Search a player, send a challenge, and open current challenge games here.';
+    elements.opponent.parentElement.classList.remove('hidden');
+    elements.challengeFields.classList.toggle('hidden', mode.id !== 'head-to-head' && mode.id !== 'blind');
+    elements.challengeBtn.classList.remove('hidden');
+  }
+
+  renderModeSections();
 }
 
 async function loadUsers() {
+  if (!state.loggedIn) return;
   const query = elements.opponent.value.trim();
   const data = await api(`/api/users?query=${encodeURIComponent(query)}`);
-  elements.userOptions.innerHTML = data.users.map((u) => `<option value="${u.username}"></option>`).join('');
+  elements.userOptions.innerHTML = data.users.map((user) => `<option value="${user.username}"></option>`).join('');
 }
 
-async function loadLeaderboard() {
-  if (!state.username) return;
-  const mode = elements.leaderboardMode.value;
-  const data = await api(`/api/leaderboard?mode=${encodeURIComponent(mode)}`);
+async function loadChallenges() {
+  if (!state.loggedIn || !state.username) return;
+  state.loadingChallenges = true;
+  renderModeSections();
 
-  elements.leaderboardBody.innerHTML = data.leaderboard
-    .map((entry) => `<tr><td>${entry.username}</td><td>${entry.points}</td><td>${entry.wins}</td><td>${entry.games}</td></tr>`)
-    .join('');
+  try {
+    const data = await api(`/api/challenges/${encodeURIComponent(state.username)}`);
+    state.challengeData = {
+      incoming: data.incoming || data.challenges || [],
+      outgoing: data.outgoing || [],
+      activeGames: data.activeGames || [],
+    };
+  } finally {
+    state.loadingChallenges = false;
+    renderModeSections();
+  }
 }
 
-async function loadHistory() {
-  if (!state.username) return;
-  const data = await api(`/api/history/${encodeURIComponent(state.username)}`);
-  elements.historyList.innerHTML = data.games
-    .slice(0, 12)
-    .map((game) => `${game.mode} • ${game.status} • guesses: ${game.guesses} ${game.opponent ? `• vs ${game.opponent}` : ''}`)
-    .map((line) => `<div>${line}</div>`)
-    .join('');
+function connectSocket() {
+  if (state.ws) {
+    state.ws.close();
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  state.ws = new WebSocket(`${protocol}://${location.host}?username=${encodeURIComponent(state.username)}`);
+  state.ws.onmessage = (event) => {
+    const payload = JSON.parse(event.data);
+
+    if (payload.type === 'connected') {
+      state.challengeData.incoming = payload.challenges || [];
+      if (!state.currentGame && payload.activeGames?.length) {
+        state.currentGame = payload.activeGames[0];
+      }
+      renderGame();
+      loadChallenges().catch(() => {});
+      return;
+    }
+
+    if (payload.type === 'challenge_pending') {
+      state.challengeData.incoming.unshift(payload.challenge);
+      renderModeSections();
+      return;
+    }
+
+    if (payload.type === 'challenge_rejected') {
+      state.challengeData.outgoing = state.challengeData.outgoing.filter((challenge) => challenge.id !== payload.challenge?.id);
+      renderModeSections();
+      return;
+    }
+
+    if (payload.type === 'game_update') {
+      if (state.currentGame?.id === payload.game.id) {
+        state.currentGame = payload.game;
+      }
+      renderGame();
+      loadChallenges().catch(() => {});
+    }
+  };
 }
+
+async function startGame(mode, opponent = '') {
+  const letterCount = Number(elements.letterCount.value);
+  const data = await api('/api/game/start', {
+    method: 'POST',
+    body: JSON.stringify({ mode, username: state.username, opponent, letterCount }),
+  });
+  state.currentGame = data.game;
+  renderGame();
+}
+
+async function startSolo() {
+  try {
+    await startGame('solo');
+    setModeStatus('Started a new solo game.');
+  } catch (error) {
+    setModeStatus(error.message);
+  }
+}
+
+async function startGuestSession() {
+  const guestName = `guest-${Date.now().toString(36)}`;
+  await api('/api/register', { method: 'POST', body: JSON.stringify({ username: guestName }) });
+  state.username = guestName;
+  state.loggedIn = false;
+  elements.authStatus.textContent = 'Playing as guest. Use Login for multiplayer modes.';
+  await startSolo();
+}
+
+function renderModeCards() {
+  elements.modeCards.innerHTML = '';
+  for (const mode of MODES) {
+    const button = document.createElement('button');
+    button.className = `mode-card${state.selectedMode === mode.id ? ' active' : ''}`;
+    button.dataset.mode = mode.id;
+    const subtitle = mode.type === 'realtime' ? 'Real-time' : mode.type === 'nonrealtime' ? 'Non-real-time' : 'Solo';
+    button.innerHTML = `<strong>${mode.label}</strong><span>${subtitle}</span>`;
+    elements.modeCards.appendChild(button);
+  }
+}
+
+elements.authToggleBtn.addEventListener('click', () => {
+  elements.authPanel.classList.toggle('hidden');
+});
 
 elements.registerBtn.addEventListener('click', async () => {
   try {
     const username = elements.username.value.trim();
     await api('/api/register', { method: 'POST', body: JSON.stringify({ username }) });
-
     state.username = username;
+    state.loggedIn = true;
     elements.authStatus.textContent = `Logged in as ${username}`;
-    showAppPanels();
+    elements.authToggleBtn.textContent = username;
+    elements.authPanel.classList.add('hidden');
+    elements.modeSidebar.classList.remove('hidden');
+    state.selectedMode = state.selectedMode || 'quick-fire';
+    renderModeCards();
+    renderModePanel();
     connectSocket();
-    loadLeaderboard();
-    loadHistory();
-    loadUsers();
+    await loadUsers();
+    await loadChallenges();
   } catch (error) {
     elements.authStatus.textContent = error.message;
+  }
+});
+
+elements.startSoloBtn.addEventListener('click', () => {
+  startSolo();
+});
+
+elements.modeCards.addEventListener('click', async (event) => {
+  const card = event.target.closest('[data-mode]');
+  if (!card) return;
+  state.selectedMode = card.dataset.mode;
+  renderModeCards();
+  renderModePanel();
+  setModeStatus('');
+
+  if (state.selectedMode === 'solo') {
+    await startSolo();
   }
 });
 
@@ -213,37 +406,77 @@ elements.opponent.addEventListener('input', () => {
   loadUsers().catch(() => {});
 });
 
-async function startOrChallenge() {
-  const mode = elements.mode.value;
-  const letterCount = Number(elements.letterCount.value);
-  const opponent = elements.opponent.value.trim();
-  const assignedWord = elements.assignedWord.value.trim().toLowerCase();
-  const hint = elements.hint.value.trim();
+elements.challengeBtn.addEventListener('click', async () => {
+  const mode = state.selectedMode;
+  if (!mode) return;
 
   try {
     if (mode === 'head-to-head' || mode === 'blind') {
       await api('/api/challenge/create', {
         method: 'POST',
-        body: JSON.stringify({ mode, from: state.username, to: opponent, letterCount, assignedWord, hint }),
+        body: JSON.stringify({
+          mode,
+          from: state.username,
+          to: elements.opponent.value.trim(),
+          letterCount: Number(elements.letterCount.value),
+          assignedWord: elements.assignedWord.value.trim().toLowerCase(),
+          hint: elements.hint.value.trim(),
+        }),
       });
-      elements.gameMeta.textContent = `Challenge sent to ${opponent}`;
+      setModeStatus(`Challenge sent to ${elements.opponent.value.trim()}.`);
+      await loadChallenges();
       return;
     }
 
-    const data = await api('/api/game/start', {
-      method: 'POST',
-      body: JSON.stringify({ mode, username: state.username, opponent, letterCount }),
-    });
-    state.currentGame = data.game;
-    renderGame();
-    loadHistory();
-  } catch (error) {
-    elements.gameMeta.textContent = error.message;
-  }
-}
+    if (mode === 'quick-fire') {
+      await startGame(mode, elements.opponent.value.trim());
+      setModeStatus('Quick Fire started.');
+      await loadChallenges();
+      return;
+    }
 
-elements.startBtn.addEventListener('click', () => {
-  startOrChallenge();
+    await startGame(mode);
+    setModeStatus(`${MODES.find((entry) => entry.id === mode)?.label} started.`);
+  } catch (error) {
+    setModeStatus(error.message);
+  }
+});
+
+elements.modeSections.addEventListener('click', async (event) => {
+  const acceptId = event.target.getAttribute('data-accept');
+  const rejectId = event.target.getAttribute('data-reject');
+  const gameId = event.target.getAttribute('data-game-id');
+
+  try {
+    if (gameId) {
+      const data = await api(`/api/game/${encodeURIComponent(gameId)}?username=${encodeURIComponent(state.username)}`);
+      state.currentGame = data.game;
+      renderGame();
+      return;
+    }
+
+    if (!acceptId && !rejectId) return;
+    const challengeId = acceptId || rejectId;
+
+    if (acceptId) {
+      const assignedWordBack = document.querySelector(`input[data-word="${challengeId}"]`)?.value?.trim()?.toLowerCase() || '';
+      const hintBack = document.querySelector(`input[data-hint="${challengeId}"]`)?.value?.trim() || '';
+      const data = await api('/api/challenge/respond', {
+        method: 'POST',
+        body: JSON.stringify({ challengeId, username: state.username, accept: true, assignedWordBack, hintBack }),
+      });
+      state.currentGame = data.game;
+      renderGame();
+    } else {
+      await api('/api/challenge/respond', {
+        method: 'POST',
+        body: JSON.stringify({ challengeId, username: state.username, accept: false }),
+      });
+    }
+    await loadChallenges();
+  } catch (error) {
+    setModeStatus(error.message);
+  }
 });
 
 elements.guessBtn.addEventListener('click', async () => {
@@ -255,48 +488,20 @@ elements.guessBtn.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ gameId: state.currentGame.id, username: state.username, guess }),
     });
-
     state.currentGame = data.game;
     elements.guess.value = '';
     renderGame();
-    loadLeaderboard();
-    loadHistory();
   } catch (error) {
     elements.gameMeta.textContent = error.message;
   }
 });
 
-elements.challengeList.addEventListener('click', async (event) => {
-  const acceptId = event.target.getAttribute('data-accept');
-  const rejectId = event.target.getAttribute('data-reject');
-  if (!acceptId && !rejectId) return;
-
-  const challengeId = acceptId || rejectId;
-
+(async () => {
+  renderModeCards();
+  renderGame();
   try {
-    if (acceptId) {
-      const assignedWordBack = document.querySelector(`input[data-word="${challengeId}"]`)?.value?.trim()?.toLowerCase();
-      const hintBack = document.querySelector(`input[data-hint="${challengeId}"]`)?.value?.trim() || '';
-      const data = await api('/api/challenge/respond', {
-        method: 'POST',
-        body: JSON.stringify({ challengeId, username: state.username, accept: true, assignedWordBack, hintBack }),
-      });
-      state.currentGame = data.game;
-    } else {
-      await api('/api/challenge/respond', {
-        method: 'POST',
-        body: JSON.stringify({ challengeId, username: state.username, accept: false }),
-      });
-    }
-
-    state.pendingChallenges = state.pendingChallenges.filter((c) => c.id !== challengeId);
-    renderChallenges();
-    renderGame();
-    loadHistory();
+    await startGuestSession();
   } catch (error) {
     elements.gameMeta.textContent = error.message;
   }
-});
-
-elements.refreshLeaderboard.addEventListener('click', () => loadLeaderboard());
-elements.leaderboardMode.addEventListener('change', () => loadLeaderboard());
+})();
