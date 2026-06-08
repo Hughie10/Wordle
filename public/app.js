@@ -6,6 +6,12 @@ const MODES = [
   { id: 'blind', label: 'Blind Challenge', type: 'nonrealtime' },
   { id: 'solo', label: 'Solo Mode', type: 'solo' },
 ];
+const KEYBOARD_ROWS = [
+  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+  ['enter', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'backspace'],
+];
+const KEY_STATUS_ORDER = { unused: 0, absent: 1, present: 2, correct: 3 };
 
 const state = {
   username: null,
@@ -43,6 +49,7 @@ const elements = {
   hintBox: document.getElementById('hint-box'),
   guess: document.getElementById('guess'),
   guessBtn: document.getElementById('guess-btn'),
+  keyboard: document.getElementById('keyboard'),
 };
 
 async function api(path, options = {}) {
@@ -69,12 +76,73 @@ function makeTile(letter, status, width) {
   return div;
 }
 
+function getLetterStates(game, playerState) {
+  const states = {};
+  for (const row of KEYBOARD_ROWS) {
+    for (const key of row) {
+      if (key.length === 1) {
+        states[key] = 'unused';
+      }
+    }
+  }
+
+  const guesses = playerState?.guesses || [];
+  for (const entry of guesses) {
+    for (let i = 0; i < entry.guess.length; i += 1) {
+      const letter = entry.guess[i];
+      const next = entry.result[i] || 'unused';
+      const current = states[letter] || 'unused';
+      if (KEY_STATUS_ORDER[next] > KEY_STATUS_ORDER[current]) {
+        states[letter] = next;
+      }
+    }
+  }
+
+  return states;
+}
+
+function makeKeyButton(key, letterStates) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'key';
+  button.dataset.key = key;
+
+  if (key === 'enter') {
+    button.classList.add('wide');
+    button.textContent = 'Enter';
+    return button;
+  }
+  if (key === 'backspace') {
+    button.classList.add('wide');
+    button.textContent = '⌫';
+    return button;
+  }
+
+  button.classList.add(letterStates[key] || 'unused');
+  button.textContent = key.toUpperCase();
+  return button;
+}
+
+function renderKeyboard(game, playerState) {
+  const letterStates = getLetterStates(game, playerState);
+  elements.keyboard.innerHTML = '';
+  for (const rowLetters of KEYBOARD_ROWS) {
+    const row = document.createElement('div');
+    row.className = 'keyboard-row';
+    for (const key of rowLetters) {
+      row.appendChild(makeKeyButton(key, letterStates));
+    }
+    elements.keyboard.appendChild(row);
+  }
+}
+
 function renderGame() {
   const game = state.currentGame;
   if (!game) {
     elements.gameMeta.textContent = 'Loading game...';
     elements.board.innerHTML = '';
     elements.hintBox.textContent = '';
+    elements.keyboard.innerHTML = '';
     return;
   }
 
@@ -103,6 +171,8 @@ function renderGame() {
     statusText.textContent = 'Solved! Waiting for game completion...';
   }
   elements.board.appendChild(statusText);
+  elements.guess.maxLength = game.letterCount;
+  renderKeyboard(game, me);
 }
 
 function createSection(title, items, emptyText, itemRenderer) {
@@ -126,7 +196,7 @@ function createSection(title, items, emptyText, itemRenderer) {
   return section;
 }
 
-function challengeItem(challenge, includeRespondActions = false) {
+function challengeItem(challenge, includeRespondActions = false, modeId = challenge.mode) {
   const wrapper = document.createElement('div');
   wrapper.className = 'challenge-item';
   const title = document.createElement('strong');
@@ -144,7 +214,7 @@ function challengeItem(challenge, includeRespondActions = false) {
     wrapper.appendChild(hint);
   }
 
-  if (includeRespondActions) {
+  if (includeRespondActions && modeId !== 'daily') {
     const wordInput = document.createElement('input');
     wordInput.placeholder = 'Assign your return word';
     wordInput.maxLength = 8;
@@ -157,6 +227,18 @@ function challengeItem(challenge, includeRespondActions = false) {
     hintInput.dataset.hint = challenge.id;
     wrapper.appendChild(hintInput);
 
+    const row = document.createElement('div');
+    row.className = 'row';
+    const accept = document.createElement('button');
+    accept.textContent = 'Accept & Start';
+    accept.dataset.accept = challenge.id;
+    const reject = document.createElement('button');
+    reject.className = 'danger';
+    reject.textContent = 'Reject';
+    reject.dataset.reject = challenge.id;
+    row.append(accept, reject);
+    wrapper.appendChild(row);
+  } else if (includeRespondActions) {
     const row = document.createElement('div');
     row.className = 'row';
     const accept = document.createElement('button');
@@ -206,13 +288,13 @@ function renderModeSections() {
       'Pending Challenges',
       outgoing,
       'No pending challenges sent yet.',
-      (challenge) => challengeItem(challenge, false),
+      (challenge) => challengeItem(challenge, false, mode.id),
     ));
     elements.modeSections.appendChild(createSection(
       'Incoming Challenges',
       [...incoming, ...activeGames],
       'No incoming challenges right now.',
-      (item) => (item.players ? gameItem(item) : challengeItem(item, true)),
+      (item) => (item.players ? gameItem(item) : challengeItem(item, true, mode.id)),
     ));
     return;
   }
@@ -222,7 +304,7 @@ function renderModeSections() {
     'Current Challenges',
     currentChallenges,
     'No current challenges for this mode.',
-    (item) => (item.players ? gameItem(item) : challengeItem(item, item.to === state.username)),
+    (item) => (item.players ? gameItem(item) : challengeItem(item, item.to === state.username, mode.id)),
   ));
 }
 
@@ -278,6 +360,42 @@ async function loadChallenges() {
   }
 }
 
+function updateActiveGameCache(game) {
+  const games = state.challengeData.activeGames || [];
+  const index = games.findIndex((entry) => entry.id === game.id);
+  if (game.status === 'active') {
+    if (index >= 0) {
+      games[index] = game;
+    } else {
+      games.unshift(game);
+    }
+  } else if (index >= 0) {
+    games.splice(index, 1);
+  }
+  state.challengeData.activeGames = games;
+
+  const challengeId = game.metadata?.challengeId;
+  if (challengeId) {
+    state.challengeData.incoming = state.challengeData.incoming.filter((challenge) => challenge.id !== challengeId);
+    state.challengeData.outgoing = state.challengeData.outgoing.filter((challenge) => challenge.id !== challengeId);
+  }
+}
+
+async function submitGuess() {
+  if (!state.currentGame) return;
+
+  const guess = elements.guess.value.trim().toLowerCase();
+  if (!guess) return;
+
+  const data = await api('/api/game/guess', {
+    method: 'POST',
+    body: JSON.stringify({ gameId: state.currentGame.id, username: state.username, guess }),
+  });
+  state.currentGame = data.game;
+  elements.guess.value = '';
+  renderGame();
+}
+
 function connectSocket() {
   if (state.ws) {
     state.ws.close();
@@ -299,7 +417,9 @@ function connectSocket() {
     }
 
     if (payload.type === 'challenge_pending') {
-      state.challengeData.incoming.unshift(payload.challenge);
+      if (!state.challengeData.incoming.some((challenge) => challenge.id === payload.challenge.id)) {
+        state.challengeData.incoming.unshift(payload.challenge);
+      }
       renderModeSections();
       return;
     }
@@ -311,11 +431,12 @@ function connectSocket() {
     }
 
     if (payload.type === 'game_update') {
-      if (state.currentGame?.id === payload.game.id) {
+      updateActiveGameCache(payload.game);
+      if (state.currentGame?.id === payload.game.id || !state.currentGame) {
         state.currentGame = payload.game;
+        renderGame();
       }
-      renderGame();
-      loadChallenges().catch(() => {});
+      renderModeSections();
     }
   };
 }
@@ -411,7 +532,7 @@ elements.challengeBtn.addEventListener('click', async () => {
   if (!mode) return;
 
   try {
-    if (mode === 'head-to-head' || mode === 'blind') {
+    if (mode === 'daily' || mode === 'head-to-head' || mode === 'blind') {
       await api('/api/challenge/create', {
         method: 'POST',
         body: JSON.stringify({
@@ -419,7 +540,7 @@ elements.challengeBtn.addEventListener('click', async () => {
           from: state.username,
           to: elements.opponent.value.trim(),
           letterCount: Number(elements.letterCount.value),
-          assignedWord: elements.assignedWord.value.trim().toLowerCase(),
+          assignedWord: elements.assignedWord.value.trim().toLowerCase() || undefined,
           hint: elements.hint.value.trim(),
         }),
       });
@@ -480,20 +601,45 @@ elements.modeSections.addEventListener('click', async (event) => {
 });
 
 elements.guessBtn.addEventListener('click', async () => {
-  if (!state.currentGame) return;
-
   try {
-    const guess = elements.guess.value.trim().toLowerCase();
-    const data = await api('/api/game/guess', {
-      method: 'POST',
-      body: JSON.stringify({ gameId: state.currentGame.id, username: state.username, guess }),
-    });
-    state.currentGame = data.game;
-    elements.guess.value = '';
-    renderGame();
+    await submitGuess();
   } catch (error) {
     elements.gameMeta.textContent = error.message;
   }
+});
+
+elements.guess.addEventListener('keydown', async (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  try {
+    await submitGuess();
+  } catch (error) {
+    elements.gameMeta.textContent = error.message;
+  }
+});
+
+elements.keyboard.addEventListener('click', async (event) => {
+  const key = event.target.closest('[data-key]')?.dataset.key;
+  if (!key || !state.currentGame || state.currentGame.status !== 'active') return;
+
+  if (key === 'enter') {
+    try {
+      await submitGuess();
+    } catch (error) {
+      elements.gameMeta.textContent = error.message;
+    }
+    return;
+  }
+
+  if (key === 'backspace') {
+    elements.guess.value = elements.guess.value.slice(0, -1);
+    elements.guess.focus();
+    return;
+  }
+
+  if (elements.guess.value.length >= state.currentGame.letterCount) return;
+  elements.guess.value += key;
+  elements.guess.focus();
 });
 
 (async () => {
