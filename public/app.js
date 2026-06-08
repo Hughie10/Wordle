@@ -340,7 +340,7 @@ async function startSolo() {
 }
 
 async function startGuestSession() {
-  const guestName = `guest-${Math.random().toString(36).slice(2, 10)}`;
+  const guestName = `guest-${Date.now().toString(36)}`;
   await api('/api/register', { method: 'POST', body: JSON.stringify({ username: guestName }) });
   state.username = guestName;
   state.loggedIn = false;
